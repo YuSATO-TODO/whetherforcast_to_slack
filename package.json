@@ -1,0 +1,19 @@
+{
+  "name": "weather-forecast-to-slack",
+  "version": "1.0.0",
+  "description": "東京都江東区の天気予報をSlackに自動投稿するBot",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "test": "node -e \"require('./main.js').testTemperatureCheck()\"",
+    "test-ignore-period": "node -e \"require('./main.js').testRunIgnorePeriod()\"",
+    "test-force-post": "node -e \"require('./main.js').testForcePost()\"",
+    "test-execution-period": "node -e \"require('./main.js').testExecutionPeriod()\""
+  },
+  "keywords": ["weather", "slack", "bot", "github-actions"],
+  "author": "YuSATO-TODO",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

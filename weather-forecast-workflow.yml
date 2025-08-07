@@ -1,0 +1,32 @@
+name: Weather Forecast Bot
+
+on:
+  schedule:
+    # 金曜日15時 (JST) = 金曜日06時 (UTC) - 翌月曜日の予報
+    - cron: '0 6 * * 5'
+    # 水曜日15時 (JST) = 水曜日06時 (UTC) - 翌日の予報
+    - cron: '0 6 * * 3'
+  
+  # 手動実行を許可
+  workflow_dispatch:
+
+jobs:
+  weather-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm install
+    
+    - name: Run weather forecast bot
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: npm start
