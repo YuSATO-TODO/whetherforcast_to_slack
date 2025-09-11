@@ -8,7 +8,12 @@
 
 // ===== 設定エリア =====
 const CONFIG = {
-  AREA_CODE: "130000", // 東京都のエリアコード
+  // OpenWeatherMap API設定
+  OPENWEATHER_API_KEY: "", // OpenWeatherMap APIキー（手動設定予定）
+  LAT: 35.67808722247862, // 緯度（東京都江東区）
+  LON: 139.78973199385607, // 経度（東京都江東区）
+  
+  // Slack設定
   SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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", // SlackのWebhook URLを設定
   BOT_NAME: "天気予報Bot",
   BOT_ICON: ":sunny:"
@@ -33,11 +38,15 @@ function main() {
       throw new Error("Slack Webhook URLが設定されていません。CONFIG.SLACK_WEBHOOK_URLを設定してください。");
     }
     
+    if (!CONFIG.OPENWEATHER_API_KEY || CONFIG.OPENWEATHER_API_KEY === "") {
+      throw new Error("OpenWeatherMap APIキーが設定されていません。CONFIG.OPENWEATHER_API_KEYを設定してください。");
+    }
+    
     // 3. 実行日を判定して対象日を決定
     const targetInfo = getTargetDateInfo();
     console.log(`対象日: ${targetInfo.label} (${targetInfo.dateString})`);
     
-    // 4. 気象庁APIから天気予報を取得
+    // 4. OpenWeatherMap APIから天気予報を取得
     const weatherData = getWeatherData();
     
     // 5. 最高気温をチェック
@@ -130,85 +139,56 @@ function getTargetDateInfo() {
 }
 
 /**
- * 気象庁APIから天気予報データを取得
+ * OpenWeatherMap APIから天気予報データを取得
  * @returns {Object} 天気予報データ
  */
 function getWeatherData() {
-  console.log("気象庁APIから天気予報を取得中...");
+  console.log("OpenWeatherMap APIから天気予報を取得中...");
   
-  const forecastUrl = `https://www.jma.go.jp/bosai/forecast/data/forecast/${CONFIG.AREA_CODE}.json`;
-  const overviewUrl = `https://www.jma.go.jp/bosai/forecast/data/overview_forecast/${CONFIG.AREA_CODE}.json`;
+  const apiUrl = `https://api.openweathermap.org/data/3.0/onecall?lat=${CONFIG.LAT}&lon=${CONFIG.LON}&exclude=minutely,alerts&appid=${CONFIG.OPENWEATHER_API_KEY}&units=metric&lang=ja`;
   
   try {
-    // 天気予報データを取得
-    const forecastResponse = UrlFetchApp.fetch(forecastUrl, {
+    const response = UrlFetchApp.fetch(apiUrl, {
       method: 'GET',
       muteHttpExceptions: true
     });
     
-    if (forecastResponse.getResponseCode() !== 200) {
-      throw new Error(`気象庁API(forecast)エラー: ${forecastResponse.getResponseCode()}`);
+    if (response.getResponseCode() !== 200) {
+      throw new Error(`OpenWeatherMap APIエラー: ${response.getResponseCode()} - ${response.getContentText()}`);
     }
     
-    // 概要データを取得
-    const overviewResponse = UrlFetchApp.fetch(overviewUrl, {
-      method: 'GET',
-      muteHttpExceptions: true
-    });
-    
-    if (overviewResponse.getResponseCode() !== 200) {
-      throw new Error(`気象庁API(overview)エラー: ${overviewResponse.getResponseCode()}`);
-    }
-    
-    const forecastData = JSON.parse(forecastResponse.getContentText());
-    const overviewData = JSON.parse(overviewResponse.getContentText());
+    const weatherData = JSON.parse(response.getContentText());
     
     console.log("天気予報データの取得が完了しました");
     
-    return {
-      forecast: forecastData,
-      overview: overviewData
-    };
+    return weatherData;
     
   } catch (error) {
-    console.error("気象庁APIの取得でエラーが発生:", error);
-    throw new Error(`気象庁APIの取得に失敗しました: ${error.toString()}`);
+    console.error("OpenWeatherMap APIの取得でエラーが発生:", error);
+    throw new Error(`OpenWeatherMap APIの取得に失敗しました: ${error.toString()}`);
   }
 }
 
 /**
  * 最高気温を取得して数値判定する
- * @param {Object} weatherData - 気象庁APIからのデータ
+ * @param {Object} weatherData - OpenWeatherMap APIからのデータ
  * @param {Object} targetInfo - 対象日の情報
  * @returns {Object} 気温情報（文字列と数値）
  */
 function getMaxTemperature(weatherData, targetInfo) {
   try {
-    const forecastData = weatherData.forecast;
-    
     // 気温データを取得
     let tempText = "データなし";
     let tempValue = -999; // 数値が取得できない場合のデフォルト値
     
-    if (forecastData[0].timeSeries.length > 2) {
-      const tempSeries = forecastData[0].timeSeries[2];
+    // OpenWeatherMapの日次予報データから対象日の最高気温を取得
+    if (weatherData.daily && weatherData.daily[targetInfo.dateIndex]) {
+      const targetDay = weatherData.daily[targetInfo.dateIndex];
       
-      for (const area of tempSeries.areas) {
-        if (area.area.name === "東京" && area.temps && area.temps[targetInfo.dateIndex]) {
-          const tempStr = area.temps[targetInfo.dateIndex];
-          
-          if (tempStr && tempStr !== "") {
-            tempText = `${tempStr}℃`;
-            tempValue = parseInt(tempStr, 10);
-            
-            // 数値変換の確認
-            if (isNaN(tempValue)) {
-              console.warn(`気温の数値変換に失敗: "${tempStr}"`);
-              tempValue = -999;
-            }
-          }
-          break;
-        }
+      if (targetDay.temp && targetDay.temp.max !== undefined) {
+        const maxTemp = Math.round(targetDay.temp.max); // 摂氏温度で四捨五入
+        tempText = `${maxTemp}℃`;
+        tempValue = maxTemp;
       }
     }
     
@@ -230,7 +210,7 @@ function getMaxTemperature(weatherData, targetInfo) {
 
 /**
  * 天気予報メッセージを作成
- * @param {Object} weatherData - 気象庁APIからのデータ
+ * @param {Object} weatherData - OpenWeatherMap APIからのデータ
  * @param {Object} targetInfo - 対象日の情報
  * @param {Object} maxTempInfo - 最高気温の情報
  * @param {boolean} isHeatWarning - 猛暑警告かどうか
@@ -238,40 +218,23 @@ function getMaxTemperature(weatherData, targetInfo) {
  */
 function createWeatherMessage(weatherData, targetInfo, maxTempInfo, isHeatWarning = false) {
   try {
-    const forecastData = weatherData.forecast;
-    const overviewData = weatherData.overview;
-    
-    // 時系列データを取得
-    const timeSeries = forecastData[0].timeSeries[0];
-    
-    // 東京地方のデータを検索
-    let tokyoArea = null;
-    for (const area of timeSeries.areas) {
-      if (area.area.name === "東京地方") {
-        tokyoArea = area;
-        break;
-      }
-    }
-    
-    if (!tokyoArea) {
-      throw new Error("東京地方のデータが見つかりませんでした");
-    }
-    
     // 対象日の天気を取得
     let weather = "データなし";
-    if (tokyoArea.weathers && tokyoArea.weathers[targetInfo.dateIndex]) {
-      weather = tokyoArea.weathers[targetInfo.dateIndex];
+    if (weatherData.daily && weatherData.daily[targetInfo.dateIndex]) {
+      const targetDay = weatherData.daily[targetInfo.dateIndex];
+      
+      if (targetDay.weather && targetDay.weather[0]) {
+        // OpenWeatherMapでは英語のdescriptionもあるが、日本語設定(lang=ja)で取得
+        weather = targetDay.weather[0].description || targetDay.weather[0].main;
+      }
     }
     
     // 天気絵文字を選択
     const weatherEmoji = getWeatherEmoji(weather);
     
-    // 発表時刻を整形
-    let publishTime = "不明";
-    if (overviewData.reportDatetime) {
-      const reportDate = new Date(overviewData.reportDatetime);
-      publishTime = Utilities.formatDate(reportDate, "Asia/Tokyo", "M月d日 H時mm分発表");
-    }
+    // 現在時刻を発表時刻として使用
+    const now = new Date();
+    const publishTime = Utilities.formatDate(now, "Asia/Tokyo", "M月d日 H時mm分取得");
     
     // 猛暑警告の場合は特別なメッセージを作成
     if (isHeatWarning) {
@@ -286,9 +249,9 @@ function createWeatherMessage(weatherData, targetInfo, maxTempInfo, isHeatWarnin
 進捗会にて意向確認させていただきます。本日チーム会が開催されない場合、こちらのメッセージに返信するかたちで@山田さん宛へ在宅勤務の申し出を16時までに行ってください。
 
 📍 **対象地域**: 東京都江東区
-📅 **発表**: ${publishTime}
+📅 **データ**: ${publishTime}
 
-via 気象庁API`;
+via OpenWeatherMap API`;
 
       return message;
     } else {
@@ -299,9 +262,9 @@ via 気象庁API`;
 ☁️ **天気**: ${weather}
 
 📍 **対象地域**: 東京都江東区
-📅 **発表**: ${publishTime}
+📅 **データ**: ${publishTime}
 
-via 気象庁API`;
+via OpenWeatherMap API`;
 
       return message;
     }
@@ -487,6 +450,10 @@ function testRunIgnorePeriod() {
       throw new Error("Slack Webhook URLが設定されていません。CONFIG.SLACK_WEBHOOK_URLを設定してください。");
     }
     
+    if (!CONFIG.OPENWEATHER_API_KEY || CONFIG.OPENWEATHER_API_KEY === "") {
+      throw new Error("OpenWeatherMap APIキーが設定されていません。CONFIG.OPENWEATHER_API_KEYを設定してください。");
+    }
+    
     // 実行日を判定して対象日を決定
     const targetInfo = getTargetDateInfo();
     console.log(`対象日: ${targetInfo.label} (${targetInfo.dateString})`);
@@ -539,6 +506,10 @@ function testTemperatureCheck() {
       throw new Error("Slack Webhook URLが設定されていません。");
     }
     
+    if (!CONFIG.OPENWEATHER_API_KEY || CONFIG.OPENWEATHER_API_KEY === "") {
+      throw new Error("OpenWeatherMap APIキーが設定されていません。");
+    }
+    
     // 対象日の情報を取得
     const targetInfo = getTargetDateInfo();
     console.log(`対象日: ${targetInfo.label} (${targetInfo.dateString})`);
@@ -581,6 +552,10 @@ function testForcePost() {
     // 設定チェック
     if (!CONFIG.SLACK_WEBHOOK_URL || CONFIG.SLACK_WEBHOOK_URL === "YOUR_SLACK_WEBHOOK_URL_HERE") {
       throw new Error("Slack Webhook URLが設定されていません。");
+    }
+    
+    if (!CONFIG.OPENWEATHER_API_KEY || CONFIG.OPENWEATHER_API_KEY === "") {
+      throw new Error("OpenWeatherMap APIキーが設定されていません。");
     }
     
     // 対象日の情報を取得
